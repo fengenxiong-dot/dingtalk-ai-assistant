@@ -1,0 +1,62 @@
+x-app: &app
+  build: .
+  env_file: .env
+  environment:
+    DATABASE_URL: postgresql+psycopg://assistant:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db/assistant
+    DATA_DIR: /app/data
+  volumes:
+    - app_data:/app/data
+  restart: unless-stopped
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: assistant
+      POSTGRES_DB: assistant
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U assistant']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+  init:
+    <<: *app
+    command: [python, -m, app, init]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+  worker:
+    <<: *app
+    command: [python, -m, app, worker]
+    depends_on:
+      init:
+        condition: service_completed_successfully
+  stream:
+    <<: *app
+    command: [python, -m, app, stream]
+    profiles: [dingtalk]
+    depends_on:
+      init:
+        condition: service_completed_successfully
+  sender:
+    <<: *app
+    command: [python, -m, app, sender]
+    profiles: [dingtalk]
+    depends_on:
+      init:
+        condition: service_completed_successfully
+  admin:
+    <<: *app
+    command: [python, -m, app, serve, --host, 0.0.0.0]
+    ports: [127.0.0.1:8000:8000]
+    depends_on:
+      init:
+        condition: service_completed_successfully
+volumes:
+  postgres_data:
+  app_data:
